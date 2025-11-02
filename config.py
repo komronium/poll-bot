@@ -1,20 +1,18 @@
-from pydantic_settings import BaseSettings
 from typing import List, Optional
-import os
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     BOT_TOKEN: str
-    CHANNEL_ID: str  # Channel username or ID
-    ADMIN_IDS: Optional[str] = None  # Comma-separated string of admin IDs
+    CHANNEL_ID: str
+    ADMIN_IDS: Optional[str] = None
     
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        extra = "ignore"  #
+        extra = "ignore"
     
     def get_admin_ids(self) -> List[int]:
-        """Parse ADMIN_IDS from environment variable (comma-separated)"""
         if not self.ADMIN_IDS:
             return []
         try:
@@ -24,4 +22,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

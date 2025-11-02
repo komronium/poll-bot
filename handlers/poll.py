@@ -1,60 +1,42 @@
-import json
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery as CBQ
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from database import get_db
 from services.poll_service import PollService
 from keyboards.inline import get_poll_keyboard, get_channel_check_keyboard, get_confirm_send_keyboard
 from keyboards.reply import get_main_keyboard
 from utils.helpers import is_admin
+from states import CreatePollStates
 from config import settings
 
 router = Router()
 
 
-class CreatePollStates(StatesGroup):
-    waiting_for_question = State()
-    waiting_for_candidates = State()
-    waiting_for_confirmation = State()
-
-
-@router.message(Command("create_poll"))
-async def cmd_create_poll(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ So'rovnoma yaratish faqat adminlar uchun mumkin.")
-        return
-    
-    await message.answer("📝 So'rovnoma matnini kiriting:")
-    await state.set_state(CreatePollStates.waiting_for_question)
-
-
+@router.message(Command("create"))
 @router.message(lambda m: m.text == "➕ So'rovnoma yaratish")
-async def create_poll_button(message: Message, state: FSMContext):
+async def start_create_poll(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
-        await message.answer("❌ So'rovnoma yaratish faqat adminlar uchun mumkin.")
+        await message.answer("<b>❌ So'rovnoma yaratish faqat adminlar uchun mumkin.</b>")
         return
-    
+
     await message.answer("📝 So'rovnoma matnini kiriting:")
     await state.set_state(CreatePollStates.waiting_for_question)
 
 
 @router.message(lambda m: m.text == "📊 So'rovnomalar")
 async def show_polls(message: Message):
-    from config import settings
     await message.answer(
-        f"📊 So'rovnomalar {settings.CHANNEL_ID} kanalida joylashgan.\n\n"
+        f"📊 So'rovnomalar <b>{settings.CHANNEL_ID}</b> kanalida joylashgan.\n\n"
         "Ovoz berish uchun kanalga o'tib, so'rovnomalardagi tugmalardan foydalaning."
     )
 
 
 @router.message(CreatePollStates.waiting_for_question)
 async def process_question(message: Message, state: FSMContext):
-    # Save message info - can be text, photo, video, etc.
     question_text = message.text or message.caption or "Media xabar"
     await state.update_data(
-        question=question_text,  # For database storage
+        question=question_text,
         original_message_id=message.message_id,
         original_chat_id=message.chat.id
     )
@@ -75,30 +57,25 @@ async def process_candidates(message: Message, state: FSMContext):
     
     data = await state.get_data()
     question = data.get("question")
-    
-    # Create candidates dict
     candidates = {str(i+1): name for i, name in enumerate(candidates_list)}
+    vote_counts = {cid: 0 for cid in candidates.keys()}
     
-    # Save poll data in state
-    poll_data_preview = {
+    poll_data = {
         "question": question,
         "candidates": candidates,
-        "vote_counts": {cid: 0 for cid in candidates.keys()}
+        "vote_counts": vote_counts
     }
+    
     await state.update_data(
         candidates=candidates,
-        poll_data=poll_data_preview
+        poll_data=poll_data
     )
     await state.set_state(CreatePollStates.waiting_for_confirmation)
     
-    # Get original message info for copying
-    data = await state.get_data()
     original_message_id = data.get("original_message_id")
     original_chat_id = data.get("original_chat_id")
+    preview_keyboard = get_poll_keyboard(candidates, vote_counts)
     
-    preview_keyboard = get_poll_keyboard(candidates, poll_data_preview["vote_counts"])
-    
-    # Copy message for preview (supports text, photo, video, etc.)
     if original_message_id and original_chat_id:
         preview_message = await message.bot.copy_message(
             chat_id=message.chat.id,
@@ -106,20 +83,17 @@ async def process_candidates(message: Message, state: FSMContext):
             message_id=original_message_id
         )
         
-        # Edit preview message to add inline keyboard
         await message.bot.edit_message_reply_markup(
             chat_id=message.chat.id,
             message_id=preview_message.message_id,
             reply_markup=preview_keyboard
         )
         
-        # Store preview message_id to handle preview votes
         await state.update_data(preview_message_id=preview_message.message_id)
     else:
-        # Fallback if message_id not found (should not happen)
         await message.answer("❌ Xatolik: Original xabar topilmadi.")
+        return
     
-    # Ask for confirmation
     await message.answer(
         "✅ Kanalga yuborilsinmi?",
         reply_markup=get_confirm_send_keyboard()
@@ -135,33 +109,26 @@ async def confirm_send_poll(callback: CBQ, state: FSMContext):
     original_message_id = data.get("original_message_id")
     original_chat_id = data.get("original_chat_id")
     
-    # Create poll in database
     with get_db() as db:
         poll = PollService.create_poll(db, question, candidates)
-        
-        bot = callback.bot
         keyboard = get_poll_keyboard(candidates, poll_data["vote_counts"])
         
-        # Copy message from admin to channel
         if original_message_id and original_chat_id:
-            copied_message = await bot.copy_message(
+            copied_message = await callback.bot.copy_message(
                 chat_id=settings.CHANNEL_ID,
                 from_chat_id=original_chat_id,
                 message_id=original_message_id
             )
             
-            # Edit message to add inline keyboard
-            await bot.edit_message_reply_markup(
+            await callback.bot.edit_message_reply_markup(
                 chat_id=settings.CHANNEL_ID,
                 message_id=copied_message.message_id,
                 reply_markup=keyboard
             )
             
-            # Update poll with message_id
             PollService.update_message_id(db, poll.id, copied_message.message_id)
         else:
-            # Fallback if message_id not found
-            sent_message = await bot.send_message(
+            sent_message = await callback.bot.send_message(
                 chat_id=settings.CHANNEL_ID,
                 text=question,
                 reply_markup=keyboard
@@ -171,13 +138,8 @@ async def confirm_send_poll(callback: CBQ, state: FSMContext):
     await callback.answer("✅ So'rovnoma kanalga yuborildi!", show_alert=True)
     await callback.message.edit_text("✅ So'rovnoma kanalga muvaffaqiyatli yuborildi!")
     
-    # Show main keyboard after creating poll
     user_id = callback.from_user.id
-    await callback.message.answer(
-        "🏠 Bosh menyu",
-        reply_markup=get_main_keyboard(user_id)
-    )
-    
+    await callback.message.answer("🏠 Bosh menyu", reply_markup=get_main_keyboard(user_id))
     await state.clear()
 
 
@@ -186,13 +148,8 @@ async def cancel_send_poll(callback: CBQ, state: FSMContext):
     await callback.answer("❌ So'rovnoma yaratish bekor qilindi")
     await callback.message.edit_text("❌ So'rovnoma yaratish bekor qilindi.")
     
-    # Show main keyboard
     user_id = callback.from_user.id
-    await callback.message.answer(
-        "🏠 Bosh menyu",
-        reply_markup=get_main_keyboard(user_id)
-    )
-    
+    await callback.message.answer("🏠 Bosh menyu", reply_markup=get_main_keyboard(user_id))
     await state.clear()
 
 
@@ -202,18 +159,19 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
     user_id = callback.from_user.id
     bot = callback.bot
     
-    # Check if this is a preview vote (during poll creation)
     if state:
         try:
             state_data = await state.get_data()
             preview_message_id = state_data.get("preview_message_id")
             if preview_message_id and callback.message.message_id == preview_message_id:
-                await callback.answer("👁️ Bu faqat ko'rinish (preview). Kanalga yuborilgandan keyin ovoz berishingiz mumkin.", show_alert=True)
+                await callback.answer(
+                    "👁️ Bu faqat ko'rinish (preview). Kanalga yuborilgandan keyin ovoz berishingiz mumkin.",
+                    show_alert=True
+                )
                 return
         except Exception:
-            pass  # If state is not available, continue with normal vote processing
+            pass
     
-    # Check channel membership first
     try:
         chat_member = await bot.get_chat_member(
             chat_id=settings.CHANNEL_ID,
@@ -225,10 +183,9 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
     
     if not is_member:
         await callback.answer(
-            "⚠️ Ovoz berish uchun kanalga a'zo bo'lishingiz kerak!",
+            "<b>⚠️ Ovoz berish uchun kanalga a'zo bo'lishingiz kerak!</b>",
             show_alert=True
         )
-        # Send message to user with channel link
         try:
             await bot.send_message(
                 chat_id=user_id,
@@ -240,52 +197,44 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
             pass
         return
     
-    # Get poll message_id
     poll_message_id = callback.message.message_id
     
     with get_db() as db:
-        # Check if user already voted
         if PollService.has_user_voted(db, user_id, poll_message_id):
-            await callback.answer("❌ Siz allaqachon ovoz bergansiz!", show_alert=True)
+            await callback.answer("<b>❌ Siz allaqachon ovoz bergansiz!</b>", show_alert=True)
             return
         
-        # Record vote
         success = PollService.vote(db, user_id, poll_message_id, candidate_id)
         
         if not success:
-            await callback.answer("❌ Ovoz berishda xatolik yuz berdi!", show_alert=True)
+            await callback.answer("<b>❌ Ovoz berishda xatolik yuz berdi!</b>", show_alert=True)
             return
         
-        # Get updated poll data
         poll_data = PollService.get_poll_data(db, poll_message_id)
         if not poll_data:
-            await callback.answer("❌ So'rovnoma topilmadi!", show_alert=True)
+            await callback.answer("<b>❌ So'rovnoma topilmadi!</b>", show_alert=True)
             return
         
-        # Update message - admin matni o'zgarmaydi, faqat inline tugmalar yangilanadi
         keyboard = get_poll_keyboard(poll_data['candidates'], poll_data['vote_counts'])
         
         try:
-            # Update only reply markup (not text) since it's a copied message
             await bot.edit_message_reply_markup(
                 chat_id=callback.message.chat.id,
                 message_id=poll_message_id,
                 reply_markup=keyboard
             )
-            await callback.answer("✅ Ovozingiz qabul qilindi!")
-        except Exception as e:
-            # Fallback: try to edit text and reply_markup together
+            await callback.answer("<b>✅ Ovozingiz qabul qilindi!</b>")
+        except Exception:
             try:
-                text = poll_data['question']
                 await bot.edit_message_text(
                     chat_id=callback.message.chat.id,
                     message_id=poll_message_id,
-                    text=text,
+                    text=poll_data['question'],
                     reply_markup=keyboard
                 )
-                await callback.answer("✅ Ovozingiz qabul qilindi!")
+                await callback.answer("<b>✅ Ovozingiz qabul qilindi!</b>")
             except Exception:
-                await callback.answer("✅ Ovoz qabul qilindi!", show_alert=True)
+                await callback.answer("<b>✅ Ovoz qabul qilindi!</b>", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "check_channel")
@@ -310,4 +259,3 @@ async def check_channel_membership(callback: CBQ):
         )
     else:
         await callback.answer("❌ Hali kanalga a'zo emassiz. A'zo bo'ling va qayta urinib ko'ring.", show_alert=True)
-

@@ -10,10 +10,9 @@ router = Router()
 async def cmd_start(message: Message):
     user_id = message.from_user.id
     keyboard = get_main_keyboard(user_id)
-    
+
     await message.answer(
-        "👋 Salom!\n\n"
-        "So'rovnomaga ovoz berish yoki yangi so'rovnoma yaratish uchun kerakli tugmani tanlang:",
+        "<b>👋 Assalomu alaykum!</b>\n\n"
+        "Yilning eng yaxshi BT yetakchisini tanlash va ovoz berish uchun quyidagi tugmalardan birini bosing 👇",
         reply_markup=keyboard
     )
-
