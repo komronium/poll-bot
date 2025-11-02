@@ -51,8 +51,10 @@ async def show_polls(message: Message):
 
 @router.message(CreatePollStates.waiting_for_question)
 async def process_question(message: Message, state: FSMContext):
+    # Save message info - can be text, photo, video, etc.
+    question_text = message.text or message.caption or "Media xabar"
     await state.update_data(
-        question=message.text,
+        question=question_text,  # For database storage
         original_message_id=message.message_id,
         original_chat_id=message.chat.id
     )
@@ -89,26 +91,33 @@ async def process_candidates(message: Message, state: FSMContext):
     )
     await state.set_state(CreatePollStates.waiting_for_confirmation)
     
-    # Show preview with inline keyboard (exactly as it will appear in channel)
-    preview_text = question  # Admin matni
+    # Get original message info for copying
+    data = await state.get_data()
+    original_message_id = data.get("original_message_id")
+    original_chat_id = data.get("original_chat_id")
+    
     preview_keyboard = get_poll_keyboard(candidates, poll_data_preview["vote_counts"])
     
-    # Store that this is a preview (we'll mark it in state)
-    await state.update_data(is_preview=True)
-    
-    await message.answer(
-        "📊 Kanalda qanday ko'rinadi:\n\n"
-        "⬇️ Quyidagi ko'rinishda kanalga yuboriladi ⬇️"
-    )
-    
-    # Send preview message exactly as it will appear in channel
-    preview_message = await message.answer(
-        preview_text,
-        reply_markup=preview_keyboard
-    )
-    
-    # Store preview message_id to handle preview votes
-    await state.update_data(preview_message_id=preview_message.message_id)
+    # Copy message for preview (supports text, photo, video, etc.)
+    if original_message_id and original_chat_id:
+        preview_message = await message.bot.copy_message(
+            chat_id=message.chat.id,
+            from_chat_id=original_chat_id,
+            message_id=original_message_id
+        )
+        
+        # Edit preview message to add inline keyboard
+        await message.bot.edit_message_reply_markup(
+            chat_id=message.chat.id,
+            message_id=preview_message.message_id,
+            reply_markup=preview_keyboard
+        )
+        
+        # Store preview message_id to handle preview votes
+        await state.update_data(preview_message_id=preview_message.message_id)
+    else:
+        # Fallback if message_id not found (should not happen)
+        await message.answer("❌ Xatolik: Original xabar topilmadi.")
     
     # Ask for confirmation
     await message.answer(
