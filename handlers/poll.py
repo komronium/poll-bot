@@ -183,7 +183,7 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
     
     if not is_member:
         await callback.answer(
-            "<b>⚠️ Ovoz berish uchun kanalga a'zo bo'lishingiz kerak!</b>",
+            "⚠️ Ovoz berish uchun kanalga a'zo bo'lishingiz kerak!",
             show_alert=True
         )
         try:
@@ -201,18 +201,18 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
     
     with get_db() as db:
         if PollService.has_user_voted(db, user_id, poll_message_id):
-            await callback.answer("<b>❌ Siz allaqachon ovoz bergansiz!</b>", show_alert=True)
+            await callback.answer("❌ Siz allaqachon ovoz bergansiz!", show_alert=True)
             return
         
         success = PollService.vote(db, user_id, poll_message_id, candidate_id)
         
         if not success:
-            await callback.answer("<b>❌ Ovoz berishda xatolik yuz berdi!</b>", show_alert=True)
+            await callback.answer("❌ Ovoz berishda xatolik yuz berdi!", show_alert=True)
             return
         
         poll_data = PollService.get_poll_data(db, poll_message_id)
         if not poll_data:
-            await callback.answer("<b>❌ So'rovnoma topilmadi!</b>", show_alert=True)
+            await callback.answer("❌ So'rovnoma topilmadi!", show_alert=True)
             return
         
         keyboard = get_poll_keyboard(poll_data['candidates'], poll_data['vote_counts'])
@@ -234,7 +234,7 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
                 )
                 await callback.answer("<b>✅ Ovozingiz qabul qilindi!</b>")
             except Exception:
-                await callback.answer("<b>✅ Ovoz qabul qilindi!</b>", show_alert=True)
+                await callback.answer("✅ Ovoz qabul qilindi!", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "check_channel")
