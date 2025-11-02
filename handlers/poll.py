@@ -223,7 +223,7 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
                 message_id=poll_message_id,
                 reply_markup=keyboard
             )
-            await callback.answer("<b>✅ Ovozingiz qabul qilindi!</b>")
+            await callback.answer("✅ Ovozingiz qabul qilindi!")
         except Exception:
             try:
                 await bot.edit_message_text(
@@ -232,7 +232,7 @@ async def process_vote(callback: CBQ, state: FSMContext = None):
                     text=poll_data['question'],
                     reply_markup=keyboard
                 )
-                await callback.answer("<b>✅ Ovozingiz qabul qilindi!</b>")
+                await callback.answer("✅ Ovozingiz qabul qilindi!")
             except Exception:
                 await callback.answer("✅ Ovoz qabul qilindi!", show_alert=True)
 
